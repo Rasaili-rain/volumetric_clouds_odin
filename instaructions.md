@@ -15,4 +15,8 @@ sudo apt install \
     libgl1-mesa-dev
 
 
+run the project :
+    odin run .
+
+
 

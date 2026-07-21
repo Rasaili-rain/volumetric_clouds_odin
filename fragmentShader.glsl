@@ -50,3 +50,4 @@ void main() {
 
     finalColor = vec4(color, 1.0);
 }
+
