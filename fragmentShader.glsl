@@ -1,10 +1,10 @@
-#version 330
+#version 450
 
 in vec2 fragTexCoord;
 out vec4 finalColor;
 
-uniform float uTime;
-uniform vec2 uResolution;
+layout(location = 0) uniform float uTime;
+layout(location = 1) uniform vec2 uResolution;
 
 #define MAX_STEPS 100
 
@@ -50,4 +50,3 @@ void main() {
 
     finalColor = vec4(color, 1.0);
 }
-

@@ -1,7 +1,7 @@
-#version 330
+#version 450
 
-in vec3 vertexPosition;
-in vec2 vertexTexCoord;
+layout(location = 0) in vec3 vertexPosition;
+layout(location = 1) in vec2 vertexTexCoord;
 
 uniform mat4 mvp;
 

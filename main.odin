@@ -12,10 +12,12 @@ SCREEN_HEIGHT := 800
 VERTEX_SHADER_PATH :: "vertexShader.glsl"
 FRAGMENT_SHADER_PATH :: "fragmentShader.glsl"
 
+// Must match the layout(location = N) uniform declarations in fragmentShader.glsl
+LOC_U_TIME :: 0
+LOC_U_RESOLUTION :: 1
+
 Shader_State :: struct {
-	shader:       rl.Shader,
-	u_time:       i32,
-	u_resolution: i32,
+	shader: rl.Shader,
 }
 
 main :: proc() {
@@ -49,8 +51,8 @@ main :: proc() {
 		time := f32(rl.GetTime())
 		resolution := [2]f32{f32(SCREEN_WIDTH), f32(SCREEN_HEIGHT)}
 
-		rl.SetShaderValue(state.shader, state.u_time, &time, .FLOAT)
-		rl.SetShaderValue(state.shader, state.u_resolution, &resolution, .VEC2)
+		rl.SetShaderValue(state.shader, LOC_U_TIME, &time, .FLOAT)
+		rl.SetShaderValue(state.shader, LOC_U_RESOLUTION, &resolution, .VEC2)
 
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.BLACK)
@@ -84,13 +86,10 @@ load_shader_state :: proc() -> (state: Shader_State, ok: bool) {
 	}
 
 	state = Shader_State {
-		shader       = shader,
-		u_time       = rl.GetShaderLocation(shader, "uTime"),
-		u_resolution = rl.GetShaderLocation(shader, "uResolution"),
+		shader = shader,
 	}
 	return state, true
 }
-
 
 reload_shader :: proc(state: ^Shader_State) {
 	new_state, ok := load_shader_state()
