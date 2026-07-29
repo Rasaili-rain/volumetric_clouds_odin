@@ -11,13 +11,17 @@ SCREEN_HEIGHT := 800
 
 VERTEX_SHADER_PATH :: "vertexShader.glsl"
 FRAGMENT_SHADER_PATH :: "fragmentShader.glsl"
+NOISE_TEXTURE_PATH :: "noise2.png"
 
 // Must match the layout(location = N) uniform declarations in fragmentShader.glsl
 LOC_U_TIME :: 0
 LOC_U_RESOLUTION :: 1
+LOC_U_NOISE_TEX :: 2
+
 
 Shader_State :: struct {
-	shader: rl.Shader,
+	shader:    rl.Shader,
+	noise_tex: rl.Texture2D,
 }
 
 main :: proc() {
@@ -37,6 +41,7 @@ main :: proc() {
 		return
 	}
 	defer rl.UnloadShader(state.shader)
+	defer rl.UnloadTexture(state.noise_tex)
 
 	for !rl.WindowShouldClose() {
 		if rl.IsWindowResized() {
@@ -50,7 +55,6 @@ main :: proc() {
 
 		time := f32(rl.GetTime())
 		resolution := [2]f32{f32(SCREEN_WIDTH), f32(SCREEN_HEIGHT)}
-
 		rl.SetShaderValue(state.shader, LOC_U_TIME, &time, .FLOAT)
 		rl.SetShaderValue(state.shader, LOC_U_RESOLUTION, &resolution, .VEC2)
 
@@ -58,6 +62,7 @@ main :: proc() {
 		rl.ClearBackground(rl.BLACK)
 
 		rl.BeginShaderMode(state.shader)
+		rl.SetShaderValueTexture(state.shader, LOC_U_NOISE_TEX, state.noise_tex)
 		rl.DrawRectangle(0, 0, i32(SCREEN_WIDTH), i32(SCREEN_HEIGHT), rl.WHITE)
 		rl.EndShaderMode()
 
@@ -73,20 +78,28 @@ load_shader_state :: proc() -> (state: Shader_State, ok: bool) {
 	fragment_source := load_shader_file(FRAGMENT_SHADER_PATH) or_return
 	defer delete(vertex_source)
 	defer delete(fragment_source)
-
 	vert_cstr := strings.clone_to_cstring(vertex_source)
 	frag_cstr := strings.clone_to_cstring(fragment_source)
 	defer delete(vert_cstr)
 	defer delete(frag_cstr)
-
 	shader := rl.LoadShaderFromMemory(vert_cstr, frag_cstr)
 	if shader.id == 0 {
 		log.error("Failed to load shader into GPU memory!")
 		return {}, false
 	}
 
+	noise_tex := rl.LoadTexture(NOISE_TEXTURE_PATH)
+	if noise_tex.id == 0 {
+		log.error("Failed to load noise texture!")
+		rl.UnloadShader(shader)
+		return {}, false
+	}
+	rl.SetTextureWrap(noise_tex, .REPEAT)
+	rl.SetTextureFilter(noise_tex, .BILINEAR)
+
 	state = Shader_State {
-		shader = shader,
+		shader    = shader,
+		noise_tex = noise_tex,
 	}
 	return state, true
 }
@@ -97,8 +110,8 @@ reload_shader :: proc(state: ^Shader_State) {
 		log.warn("Reload failed, keeping previous shader.")
 		return
 	}
-
 	rl.UnloadShader(state.shader)
+	rl.UnloadTexture(state.noise_tex)
 	state^ = new_state
 	log.info("Shader reloaded successfully.")
 }
