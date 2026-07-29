@@ -11,9 +11,9 @@ SCREEN_HEIGHT := 800
 
 RENDER_SCALE :: 0.5 // render the raymarch shader at half resolution
 
-VERTEX_SHADER_PATH :: "vertexShader.glsl"
-FRAGMENT_SHADER_PATH :: "fragmentShader.glsl"
-UPSCALE_SHADER_PATH :: "bicubicUpscale.glsl"
+VERTEX_SHADER_PATH :: "shaders/vertexShader.glsl"
+FRAGMENT_SHADER_PATH :: "shaders/fragmentShader.glsl"
+UPSCALE_SHADER_PATH :: "shaders/bicubicUpscale.glsl"
 
 LOC_U_TIME :: 0
 LOC_U_RESOLUTION :: 1
@@ -25,8 +25,8 @@ UP_LOC_U_TEXTURE :: 0
 UP_LOC_U_TEXEL_SIZE :: 1
 UP_LOC_U_FULL_SIZE :: 2
 
-NOISE_TEXTURE_PATH :: "noise.png"
-BLUE_NOISE_TEXTURE_PATH :: "blueNoise.png"
+NOISE_TEXTURE_PATH :: "assets/noise.png"
+BLUE_NOISE_TEXTURE_PATH :: "assets/blueNoise.png"
 
 Shader_State :: struct {
 	shader:             rl.Shader,
