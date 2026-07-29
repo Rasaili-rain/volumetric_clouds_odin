@@ -12,6 +12,8 @@ layout(location = 4) uniform int uFrame;
 #define MAX_STEPS 100
 #define MAX_STEPS_LIGHTS 6
 #define ABSORPTION_COEFFICIENT 0.9
+#define SCATTERING_ANISO 0.3
+#define PI 3.14159265359
 
 float sdSphere(vec3 p, float radius) {
     return length(p) - radius;
@@ -19,6 +21,11 @@ float sdSphere(vec3 p, float radius) {
 
 float BeersLaw(float dist, float absorption) {
     return exp(-dist * absorption);
+}
+
+float HenyeyGreenstein(float g, float mu) {
+  float gg = g * g;
+	return (1.0 / (4.0 * PI))  * ((1.0 - gg) / pow(1.0 + gg - 2.0 * g * mu, 1.5));
 }
 
 float noise(in vec3 x) {
@@ -91,14 +98,14 @@ float raymarch(vec3 rayOrigin, vec3 rayDirection, float offset) {
 
     float totalTransmittance = 1.0;
     float lightEnergy = 0.0;
+    float phase = HenyeyGreenstein(SCATTERING_ANISO, dot(rayDirection, sunDirection));
 
     for (int i = 0; i < MAX_STEPS; i++) {
         float density = scene(p, false);
 
         if (density > 0.0) {
-            // float transmittance = BeersLaw(density * MARCH_SIZE, ABSORPTION_COEFFICIENT);
             float lightTransmittance = lightmarch(p, rayDirection);
-            float luminance = density;
+            float luminance = 0.09 + density * phase;
 
             totalTransmittance *= lightTransmittance;
             lightEnergy += totalTransmittance * luminance;
@@ -125,7 +132,7 @@ void main() {
     float sun = clamp(dot(sunDirection, rd), 0.0, 1.0);
 
     // Base sky color
-    vec3 color = vec3(0.7, 0.7, 0.90);
+    vec3 color = vec3(0.6, 0.6, 0.80);
     color -= 0.8 * vec3(0.90, 0.75, 0.90) * rd.y;
     // Add sun color to sky
     color += 0.5 * sunColor * pow(sun, 10.0);
