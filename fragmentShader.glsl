@@ -10,6 +10,7 @@ layout(location = 3) uniform sampler2D uBlueNoiseTex;
 layout(location = 4) uniform int uFrame;
 
 #define MAX_STEPS 100
+#define ABSORPTION_COEFFICIENT 0.9
 #define PI 3.14159265359
 
 mat2 rotate2D(float a) {
@@ -76,11 +77,11 @@ float fbm(vec3 p) {
 }
 
 float scene(vec3 p) {
-  float distance = sdSphere(p, 2.0);
+    float distance = sdSphere(p, 2.0);
 
-  float f = fbm(p);
+    float f = fbm(p);
 
-  return -distance + f;
+    return -distance + f;
 }
 
 // float scene(vec3 p) {
@@ -103,26 +104,34 @@ float scene(vec3 p) {
 const vec3 SUN_POSITION = vec3(1.0, 0.0, 0.0);
 const float MARCH_SIZE = 0.1;
 
-vec4 raymarch(vec3 rayOrigin, vec3 rayDirection, float offset) {
+float BeersLaw(float dist, float absorption) {
+    return exp(-dist * absorption);
+}
+
+float raymarch(vec3 rayOrigin, vec3 rayDirection, float offset) {
     float depth = 0.0;
     depth += MARCH_SIZE * offset;
+
     vec3 p = rayOrigin + depth * rayDirection;
     vec3 sunDirection = normalize(SUN_POSITION);
-    vec4 res = vec4(0.0);
+
+    float totalTransmittance = 1.0;
+    float lightEnergy = 0.0;
+
     for (int i = 0; i < MAX_STEPS; i++) {
         float density = scene(p);
+
         if (density > 0.0) {
-            float diffuse = clamp((scene(p) - scene(p + 0.3 * sunDirection)) / 0.3, 0.0, 1.0);
-            vec3 lin = vec3(0.60, 0.60, 0.75) * 1.1 + 0.8 * vec3(1.0, 0.6, 0.3) * diffuse;
-            vec4 color = vec4(mix(vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0), density), density);
-            color.rgb *= lin;
-            color.rgb *= color.a;
-            res += color * (1.0 - res.a);
+            float transmittance = BeersLaw(density * MARCH_SIZE, ABSORPTION_COEFFICIENT);
+            float luminance = density;
+
+            totalTransmittance *= transmittance;
+            lightEnergy += totalTransmittance * luminance;
         }
         depth += MARCH_SIZE;
         p = rayOrigin + depth * rayDirection;
     }
-    return res;
+    return lightEnergy;
 }
 
 void main() {
@@ -130,21 +139,27 @@ void main() {
     uv -= 0.5;
     uv.x *= uResolution.x / uResolution.y;
 
+    // Ray Origin - camera
     vec3 ro = vec3(0.0, 0.0, 5.0);
+    // Ray Direction
     vec3 rd = normalize(vec3(uv, -1.0));
 
+    // Sun and Sky
+    vec3 sunColor = vec3(1.0, 0.5, 0.3);
     vec3 sunDirection = normalize(SUN_POSITION);
     float sun = clamp(dot(sunDirection, rd), 0.0, 1.0);
 
+    // Base sky color
     vec3 color = vec3(0.7, 0.7, 0.90);
     color -= 0.8 * vec3(0.90, 0.75, 0.90) * rd.y;
-    color += 0.5 * vec3(1.0, 0.5, 0.3) * pow(sun, 10.0);
+    // Add sun color to sky
+    color += 0.5 * sunColor * pow(sun, 10.0);
 
     float blueNoise = texture(uBlueNoiseTex, gl_FragCoord.xy / vec2(textureSize(uBlueNoiseTex, 0))).r;
     float offset = fract(blueNoise + float(uFrame % 32) * 0.61803398875);
 
-    vec4 res = raymarch(ro, rd, offset);
-    color = color * (1.0 - res.a) + res.rgb;
+    // Cloud
+    float res = raymarch(ro, rd, offset);
+    color = color + sunColor * res;
     finalColor = vec4(color, 1.0);
 }
-
