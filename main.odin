@@ -11,17 +11,24 @@ SCREEN_HEIGHT := 800
 
 VERTEX_SHADER_PATH :: "vertexShader.glsl"
 FRAGMENT_SHADER_PATH :: "fragmentShader.glsl"
-NOISE_TEXTURE_PATH :: "noise2.png"
 
 // Must match the layout(location = N) uniform declarations in fragmentShader.glsl
 LOC_U_TIME :: 0
 LOC_U_RESOLUTION :: 1
 LOC_U_NOISE_TEX :: 2
+LOC_U_BLUE_NOISE_TEX :: 3
+LOC_U_FRAME :: 4
+
+NOISE_TEXTURE_PATH :: "noise.png"
+BLUE_NOISE_TEXTURE_PATH :: "blueNoise.png"
 
 
 Shader_State :: struct {
-	shader:    rl.Shader,
-	noise_tex: rl.Texture2D,
+	shader:             rl.Shader,
+	noise_tex:          rl.Texture2D,
+	noise_tex_loc:      i32,
+	blue_noise_tex:     rl.Texture2D,
+	blue_noise_tex_loc: i32,
 }
 
 main :: proc() {
@@ -43,34 +50,35 @@ main :: proc() {
 	defer rl.UnloadShader(state.shader)
 	defer rl.UnloadTexture(state.noise_tex)
 
-	for !rl.WindowShouldClose() {
-		if rl.IsWindowResized() {
-			SCREEN_WIDTH = int(rl.GetScreenWidth())
-			SCREEN_HEIGHT = int(rl.GetScreenHeight())
+	frame_count: i32 = 0
+
+		for !rl.WindowShouldClose() {
+			if rl.IsWindowResized() {
+				SCREEN_WIDTH = int(rl.GetScreenWidth())
+				SCREEN_HEIGHT = int(rl.GetScreenHeight())
+			}
+			if rl.IsKeyPressed(.F5) {
+				reload_shader(&state)
+			}
+			time := f32(rl.GetTime())
+			resolution := [2]f32{f32(SCREEN_WIDTH), f32(SCREEN_HEIGHT)}
+			rl.SetShaderValue(state.shader, LOC_U_TIME, &time, .FLOAT)
+			rl.SetShaderValue(state.shader, LOC_U_RESOLUTION, &resolution, .VEC2)
+			rl.SetShaderValue(state.shader, LOC_U_FRAME, &frame_count, .INT)
+
+			rl.BeginDrawing()
+			rl.ClearBackground(rl.BLACK)
+			rl.BeginShaderMode(state.shader)
+			rl.SetShaderValueTexture(state.shader, state.noise_tex_loc, state.noise_tex)
+			rl.SetShaderValueTexture(state.shader, state.blue_noise_tex_loc, state.blue_noise_tex)
+			rl.DrawRectangle(0, 0, i32(SCREEN_WIDTH), i32(SCREEN_HEIGHT), rl.WHITE)
+			rl.EndShaderMode()
+			rl.DrawText(fmt.ctprint("FPS:", rl.GetFPS()), 10, 10, 20, rl.WHITE)
+			rl.DrawText("F5: reload shader", 10, 35, 10, rl.WHITE)
+			rl.EndDrawing()
+
+			frame_count += 1
 		}
-
-		if rl.IsKeyPressed(.F5) {
-			reload_shader(&state)
-		}
-
-		time := f32(rl.GetTime())
-		resolution := [2]f32{f32(SCREEN_WIDTH), f32(SCREEN_HEIGHT)}
-		rl.SetShaderValue(state.shader, LOC_U_TIME, &time, .FLOAT)
-		rl.SetShaderValue(state.shader, LOC_U_RESOLUTION, &resolution, .VEC2)
-
-		rl.BeginDrawing()
-		rl.ClearBackground(rl.BLACK)
-
-		rl.BeginShaderMode(state.shader)
-		rl.SetShaderValueTexture(state.shader, LOC_U_NOISE_TEX, state.noise_tex)
-		rl.DrawRectangle(0, 0, i32(SCREEN_WIDTH), i32(SCREEN_HEIGHT), rl.WHITE)
-		rl.EndShaderMode()
-
-		rl.DrawText(fmt.ctprint("FPS:", rl.GetFPS()), 10, 10, 20, rl.WHITE)
-		rl.DrawText("F5: reload shader", 10, 35, 10, rl.WHITE)
-
-		rl.EndDrawing()
-	}
 }
 
 load_shader_state :: proc() -> (state: Shader_State, ok: bool) {
@@ -97,12 +105,26 @@ load_shader_state :: proc() -> (state: Shader_State, ok: bool) {
 	rl.SetTextureWrap(noise_tex, .REPEAT)
 	rl.SetTextureFilter(noise_tex, .BILINEAR)
 
+	blue_noise_tex := rl.LoadTexture(BLUE_NOISE_TEXTURE_PATH)
+	if blue_noise_tex.id == 0 {
+		log.error("Failed to load blue noise texture!")
+		rl.UnloadShader(shader)
+		rl.UnloadTexture(noise_tex)
+		return {}, false
+	}
+	rl.SetTextureWrap(blue_noise_tex, .REPEAT)
+	rl.SetTextureFilter(blue_noise_tex, .POINT)
+
 	state = Shader_State {
-		shader    = shader,
-		noise_tex = noise_tex,
+		shader             = shader,
+		noise_tex          = noise_tex,
+		noise_tex_loc      = rl.GetShaderLocation(shader, "uNoiseTex"),
+		blue_noise_tex     = blue_noise_tex,
+		blue_noise_tex_loc = rl.GetShaderLocation(shader, "uBlueNoiseTex"),
 	}
 	return state, true
 }
+
 
 reload_shader :: proc(state: ^Shader_State) {
 	new_state, ok := load_shader_state()
@@ -112,6 +134,7 @@ reload_shader :: proc(state: ^Shader_State) {
 	}
 	rl.UnloadShader(state.shader)
 	rl.UnloadTexture(state.noise_tex)
+	rl.UnloadTexture(state.blue_noise_tex)
 	state^ = new_state
 	log.info("Shader reloaded successfully.")
 }
