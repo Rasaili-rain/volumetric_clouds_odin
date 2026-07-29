@@ -9,19 +9,24 @@ import rl "vendor:raylib"
 SCREEN_WIDTH := 800
 SCREEN_HEIGHT := 800
 
+RENDER_SCALE :: 0.5 // render the raymarch shader at half resolution
+
 VERTEX_SHADER_PATH :: "vertexShader.glsl"
 FRAGMENT_SHADER_PATH :: "fragmentShader.glsl"
+UPSCALE_SHADER_PATH :: "bicubicUpscale.glsl"
 
-// Must match the layout(location = N) uniform declarations in fragmentShader.glsl
 LOC_U_TIME :: 0
 LOC_U_RESOLUTION :: 1
 LOC_U_NOISE_TEX :: 2
 LOC_U_BLUE_NOISE_TEX :: 3
 LOC_U_FRAME :: 4
 
+UP_LOC_U_TEXTURE :: 0
+UP_LOC_U_TEXEL_SIZE :: 1
+UP_LOC_U_FULL_SIZE :: 2
+
 NOISE_TEXTURE_PATH :: "noise.png"
 BLUE_NOISE_TEXTURE_PATH :: "blueNoise.png"
-
 
 Shader_State :: struct {
 	shader:             rl.Shader,
@@ -49,36 +54,73 @@ main :: proc() {
 	}
 	defer rl.UnloadShader(state.shader)
 	defer rl.UnloadTexture(state.noise_tex)
+	defer rl.UnloadTexture(state.blue_noise_tex)
+
+	upscale_shader := rl.LoadShader(nil, UPSCALE_SHADER_PATH)
+	defer rl.UnloadShader(upscale_shader)
+
+	render_w := i32(f32(SCREEN_WIDTH) * RENDER_SCALE)
+	render_h := i32(f32(SCREEN_HEIGHT) * RENDER_SCALE)
+	target := rl.LoadRenderTexture(render_w, render_h)
+	defer rl.UnloadRenderTexture(target)
 
 	frame_count: i32 = 0
 
-		for !rl.WindowShouldClose() {
-			if rl.IsWindowResized() {
-				SCREEN_WIDTH = int(rl.GetScreenWidth())
-				SCREEN_HEIGHT = int(rl.GetScreenHeight())
-			}
-			if rl.IsKeyPressed(.F5) {
-				reload_shader(&state)
-			}
-			time := f32(rl.GetTime())
-			resolution := [2]f32{f32(SCREEN_WIDTH), f32(SCREEN_HEIGHT)}
-			rl.SetShaderValue(state.shader, LOC_U_TIME, &time, .FLOAT)
-			rl.SetShaderValue(state.shader, LOC_U_RESOLUTION, &resolution, .VEC2)
-			rl.SetShaderValue(state.shader, LOC_U_FRAME, &frame_count, .INT)
-
-			rl.BeginDrawing()
-			rl.ClearBackground(rl.BLACK)
-			rl.BeginShaderMode(state.shader)
-			rl.SetShaderValueTexture(state.shader, state.noise_tex_loc, state.noise_tex)
-			rl.SetShaderValueTexture(state.shader, state.blue_noise_tex_loc, state.blue_noise_tex)
-			rl.DrawRectangle(0, 0, i32(SCREEN_WIDTH), i32(SCREEN_HEIGHT), rl.WHITE)
-			rl.EndShaderMode()
-			rl.DrawText(fmt.ctprint("FPS:", rl.GetFPS()), 10, 10, 20, rl.WHITE)
-			rl.DrawText("F5: reload shader", 10, 35, 10, rl.WHITE)
-			rl.EndDrawing()
-
-			frame_count += 1
+	for !rl.WindowShouldClose() {
+		if rl.IsWindowResized() {
+			SCREEN_WIDTH = int(rl.GetScreenWidth())
+			SCREEN_HEIGHT = int(rl.GetScreenHeight())
+			rl.UnloadRenderTexture(target)
+			render_w = i32(f32(SCREEN_WIDTH) * RENDER_SCALE)
+			render_h = i32(f32(SCREEN_HEIGHT) * RENDER_SCALE)
+			target = rl.LoadRenderTexture(render_w, render_h)
 		}
+		if rl.IsKeyPressed(.F5) {
+			reload_shader(&state)
+		}
+
+		time := f32(rl.GetTime())
+		resolution := [2]f32{f32(render_w), f32(render_h)}
+		rl.SetShaderValue(state.shader, LOC_U_TIME, &time, .FLOAT)
+		rl.SetShaderValue(state.shader, LOC_U_RESOLUTION, &resolution, .VEC2)
+		rl.SetShaderValue(state.shader, LOC_U_FRAME, &frame_count, .INT)
+
+		// Pass 1: render raymarch shader into the low-res target
+		rl.BeginTextureMode(target)
+		rl.ClearBackground(rl.BLACK)
+		rl.BeginShaderMode(state.shader)
+		rl.SetShaderValueTexture(state.shader, state.noise_tex_loc, state.noise_tex)
+		rl.SetShaderValueTexture(state.shader, state.blue_noise_tex_loc, state.blue_noise_tex)
+		rl.DrawRectangle(0, 0, render_w, render_h, rl.WHITE)
+		rl.EndShaderMode()
+		rl.EndTextureMode()
+
+		// Pass 2: bicubic-upscale the low-res target to the screen
+		texel_size := [2]f32{1.0 / f32(render_w), 1.0 / f32(render_h)}
+		full_size := [2]f32{f32(render_w), f32(render_h)}
+		rl.SetShaderValue(upscale_shader, UP_LOC_U_TEXEL_SIZE, &texel_size, .VEC2)
+		rl.SetShaderValue(upscale_shader, UP_LOC_U_FULL_SIZE, &full_size, .VEC2)
+
+		rl.BeginDrawing()
+		rl.ClearBackground(rl.BLACK)
+		rl.BeginShaderMode(upscale_shader)
+		rl.SetShaderValueTexture(upscale_shader, UP_LOC_U_TEXTURE, target.texture)
+		rl.DrawTexturePro(
+			target.texture,
+			rl.Rectangle{0, 0, f32(render_w), f32(render_h)},
+			rl.Rectangle{0, 0, f32(SCREEN_WIDTH), f32(SCREEN_HEIGHT)},
+			rl.Vector2{0, 0},
+			0,
+			rl.WHITE,
+		)
+		rl.EndShaderMode()
+
+		rl.DrawText(fmt.ctprint("FPS:", rl.GetFPS()), 10, 10, 20, rl.WHITE)
+		rl.DrawText("F5: reload shader", 10, 35, 10, rl.WHITE)
+		rl.EndDrawing()
+
+		frame_count += 1
+	}
 }
 
 load_shader_state :: proc() -> (state: Shader_State, ok: bool) {
@@ -124,7 +166,6 @@ load_shader_state :: proc() -> (state: Shader_State, ok: bool) {
 	}
 	return state, true
 }
-
 
 reload_shader :: proc(state: ^Shader_State) {
 	new_state, ok := load_shader_state()
