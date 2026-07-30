@@ -9,7 +9,7 @@ import "core:unicode/utf8"
 import rl "vendor:raylib"
 import mu "vendor:microui"
 
-SCREEN_WIDTH := 800
+SCREEN_WIDTH := 1200
 SCREEN_HEIGHT := 800
 
 VERTEX_SHADER_PATH :: "shaders/vertexShader.glsl"
@@ -39,12 +39,29 @@ LOC_U_CLOUD_TINT       :: 19
 LOC_U_SUN_GLOW_EXP     :: 20
 LOC_U_NOISE_SCALE      :: 21
 
+// --- toggle uniform locations ---
+LOC_U_ENABLE_CLOUDS        :: 22
+LOC_U_ENABLE_ANIMATION     :: 23
+LOC_U_ENABLE_LIGHT_MARCH   :: 24
+LOC_U_ENABLE_POWDER        :: 25
+LOC_U_ENABLE_ANISOTROPY    :: 26
+LOC_U_ENABLE_SUN_GLOW      :: 27
+LOC_U_ENABLE_SKY_GRADIENT  :: 28
+LOC_U_ENABLE_DITHER        :: 29
+LOC_U_ENABLE_TONEMAP       :: 30
+LOC_U_LOW_QUALITY_NOISE    :: 31
+
 NOISE_TEXTURE_PATH :: "assets/noise.png"
 BLUE_NOISE_TEXTURE_PATH :: "assets/blueNoise.png"
 
-// --- UI panel docking ---
-PANEL_WIDTH  :: 320
+PANEL_WIDTH_FRACTION :: 0.26
+PANEL_MIN_WIDTH :: 280
+PANEL_MAX_WIDTH :: 460
 PANEL_MARGIN :: 10
+DIVIDER_WIDTH :: 2
+
+PANEL_BG    :: rl.Color{22, 22, 26, 255}
+DIVIDER_COL :: rl.Color{60, 60, 68, 255}
 
 Shader_State :: struct {
 	shader:             rl.Shader,
@@ -72,11 +89,23 @@ Cloud_Params :: struct {
 	cloud_tint:        [3]f32,
 	sun_glow_exponent: f32,
 	noise_scale:       f32,
+
+	// --- feature toggles ---
+	enable_clouds:       bool,
+	enable_animation:    bool,
+	enable_light_march:  bool,
+	enable_powder:       bool,
+	enable_anisotropy:   bool,
+	enable_sun_glow:     bool,
+	enable_sky_gradient: bool,
+	enable_dither:       bool,
+	enable_tonemap:      bool,
+	low_quality_noise:   bool,
 }
 
 default_params :: proc() -> Cloud_Params {
 	return Cloud_Params{
-		sphere_radius     = 1.2,
+		sphere_radius     = 1.5,
 		absorption        = 0.9,
 		anisotropy        = 0.3,
 		sun_dir           = {1.0, 0.0, 0.0},
@@ -93,7 +122,22 @@ default_params :: proc() -> Cloud_Params {
 		cloud_tint        = {1.0, 1.0, 1.0},
 		sun_glow_exponent = 10.0,
 		noise_scale       = 1.0,
+
+		enable_clouds       = true,
+		enable_animation    = true,
+		enable_light_march  = true,
+		enable_powder       = true,
+		enable_anisotropy   = true,
+		enable_sun_glow     = true,
+		enable_sky_gradient = true,
+		enable_dither       = true,
+		enable_tonemap      = false,
+		low_quality_noise   = false,
 	}
+}
+
+b2i :: proc(b: bool) -> i32 {
+	return b ? 1 : 0
 }
 
 // --- microui/raylib glue (adapted from odin-lang/examples) ---
@@ -257,12 +301,33 @@ real_slider :: proc(ctx: ^mu.Context, val: ^f32, lo, hi: f32) -> (res: mu.Result
 	return
 }
 
+// checkbox helper so each toggle gets a stable id (bool addresses can alias otherwise)
+toggle :: proc(ctx: ^mu.Context, label: string, val: ^bool) {
+	mu.push_id(ctx, uintptr(val))
+	mu.checkbox(ctx, label, val)
+	mu.pop_id(ctx)
+}
+
+// --- layout: scene occupies the left region, panel is docked to the right ---
+// both are derived from the *current* window size every call, so they always
+// agree with each other and with whatever just got resized.
+
+panel_width :: proc() -> i32 {
+	w := i32(f32(SCREEN_WIDTH) * PANEL_WIDTH_FRACTION)
+	return clamp(w, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH)
+}
+
+scene_rect :: proc() -> (x, y, w, h: i32) {
+	w = max(i32(SCREEN_WIDTH) - panel_width() - PANEL_MARGIN * 2 - DIVIDER_WIDTH, 1)
+	h = i32(SCREEN_HEIGHT)
+	return 0, 0, w, h
+}
 
 dock_rect :: proc() -> mu.Rect {
 	return mu.Rect{
-		i32(SCREEN_WIDTH) - PANEL_WIDTH - PANEL_MARGIN,
+		i32(SCREEN_WIDTH) - panel_width() - PANEL_MARGIN,
 		PANEL_MARGIN,
-		PANEL_WIDTH,
+		panel_width(),
 		i32(SCREEN_HEIGHT) - PANEL_MARGIN * 2,
 	}
 }
@@ -271,6 +336,22 @@ draw_cloud_controls :: proc(ctx: ^mu.Context, p: ^Cloud_Params) {
 	rect := dock_rect()
 
 	if mu.window(ctx, "Cloud Parameters", rect) {
+
+		if .ACTIVE in mu.header(ctx, "Toggles", {.EXPANDED}) {
+			toggle_col := (panel_width() - PANEL_MARGIN * 2 - 40) / 2
+			mu.layout_row(ctx, {toggle_col, toggle_col}, 0)
+			toggle(ctx, "Clouds",       &p.enable_clouds)
+			toggle(ctx, "Animate",      &p.enable_animation)
+			toggle(ctx, "Self-Shadow",  &p.enable_light_march)
+			toggle(ctx, "Powder Edges", &p.enable_powder)
+			toggle(ctx, "Anisotropy",   &p.enable_anisotropy)
+			toggle(ctx, "Sun Glow",     &p.enable_sun_glow)
+			toggle(ctx, "Sky Gradient", &p.enable_sky_gradient)
+			toggle(ctx, "Dither",       &p.enable_dither)
+			toggle(ctx, "Tonemap",      &p.enable_tonemap)
+			toggle(ctx, "Fast Preview", &p.low_quality_noise)
+		}
+
 		mu.layout_row(ctx, {110, -1}, 0)
 		mu.label(ctx, "Radius");     real_slider(ctx, &p.sphere_radius, 0.2, 3.0)
 		mu.label(ctx, "Absorption"); real_slider(ctx, &p.absorption, 0.0, 3.0)
@@ -300,13 +381,13 @@ draw_cloud_controls :: proc(ctx: ^mu.Context, p: ^Cloud_Params) {
 			mu.label(ctx, "Tint B"); real_slider(ctx, &p.cloud_tint.b, 0, 2)
 		}
 
-		if .ACTIVE in mu.header(ctx, "Sun Direction", {.EXPANDED}) {
+		if .ACTIVE in mu.header(ctx, "Sun Direction") {
 			mu.layout_row(ctx, {50, -1}, 0)
 			mu.label(ctx, "X"); real_slider(ctx, &p.sun_dir.x, -1, 1)
 			mu.label(ctx, "Y"); real_slider(ctx, &p.sun_dir.y, -1, 1)
 			mu.label(ctx, "Z"); real_slider(ctx, &p.sun_dir.z, -1, 1)
 		}
-		if .ACTIVE in mu.header(ctx, "Sun Color", {.EXPANDED}) {
+		if .ACTIVE in mu.header(ctx, "Sun Color") {
 			mu.layout_row(ctx, {50, -1}, 0)
 			mu.label(ctx, "R"); real_slider(ctx, &p.sun_color.r, 0, 1)
 			mu.label(ctx, "G"); real_slider(ctx, &p.sun_color.g, 0, 1)
@@ -355,13 +436,31 @@ main :: proc() {
 	params := default_params()
 	frame_count: i32 = 0
 
+	// off-screen target the cloud shader renders into; sized to the left (scene) region only
+	_, _, scene_w, scene_h := scene_rect()
+	scene_target := rl.LoadRenderTexture(scene_w, scene_h)
+	defer rl.UnloadRenderTexture(scene_target)
+
 	for !rl.WindowShouldClose() {
-		if rl.IsWindowResized() {
-			SCREEN_WIDTH = int(rl.GetScreenWidth())
-			SCREEN_HEIGHT = int(rl.GetScreenHeight())
+		// poll the real framebuffer size every frame rather than relying on
+		// IsWindowResized(), which can miss the frame a maximize/fullscreen
+		// transition happens on (and GetRenderWidth/Height also accounts for
+		// HighDPI/Retina scaling, unlike GetScreenWidth/Height).
+		SCREEN_WIDTH = int(rl.GetRenderWidth())
+		SCREEN_HEIGHT = int(rl.GetRenderHeight())
+
+		if rl.IsKeyPressed(.F11) {
+			rl.ToggleFullscreen()
 		}
 		if rl.IsKeyPressed(.F5) {
 			reload_shader(&state)
+		}
+
+		// keep the render target in sync with the scene region's size
+		_, _, want_w, want_h := scene_rect()
+		if want_w != scene_target.texture.width || want_h != scene_target.texture.height {
+			rl.UnloadRenderTexture(scene_target)
+			scene_target = rl.LoadRenderTexture(want_w, want_h)
 		}
 
 		ctx := &ui_state.mu_ctx
@@ -371,7 +470,7 @@ main :: proc() {
 		mu.end(ctx)
 
 		time := f32(rl.GetTime())
-		resolution := [2]f32{f32(SCREEN_WIDTH), f32(SCREEN_HEIGHT)}
+		resolution := [2]f32{f32(scene_target.texture.width), f32(scene_target.texture.height)}
 		rl.SetShaderValue(state.shader, LOC_U_TIME, &time, .FLOAT)
 		rl.SetShaderValue(state.shader, LOC_U_RESOLUTION, &resolution, .VEC2)
 		rl.SetShaderValue(state.shader, LOC_U_FRAME, &frame_count, .INT)
@@ -393,13 +492,50 @@ main :: proc() {
 		rl.SetShaderValue(state.shader, LOC_U_SUN_GLOW_EXP, &params.sun_glow_exponent, .FLOAT)
 		rl.SetShaderValue(state.shader, LOC_U_NOISE_SCALE, &params.noise_scale, .FLOAT)
 
-		rl.BeginDrawing()
+		enable_clouds       := b2i(params.enable_clouds)
+		enable_animation    := b2i(params.enable_animation)
+		enable_light_march  := b2i(params.enable_light_march)
+		enable_powder       := b2i(params.enable_powder)
+		enable_anisotropy   := b2i(params.enable_anisotropy)
+		enable_sun_glow     := b2i(params.enable_sun_glow)
+		enable_sky_gradient := b2i(params.enable_sky_gradient)
+		enable_dither       := b2i(params.enable_dither)
+		enable_tonemap      := b2i(params.enable_tonemap)
+		low_quality_noise   := b2i(params.low_quality_noise)
+		rl.SetShaderValue(state.shader, LOC_U_ENABLE_CLOUDS, &enable_clouds, .INT)
+		rl.SetShaderValue(state.shader, LOC_U_ENABLE_ANIMATION, &enable_animation, .INT)
+		rl.SetShaderValue(state.shader, LOC_U_ENABLE_LIGHT_MARCH, &enable_light_march, .INT)
+		rl.SetShaderValue(state.shader, LOC_U_ENABLE_POWDER, &enable_powder, .INT)
+		rl.SetShaderValue(state.shader, LOC_U_ENABLE_ANISOTROPY, &enable_anisotropy, .INT)
+		rl.SetShaderValue(state.shader, LOC_U_ENABLE_SUN_GLOW, &enable_sun_glow, .INT)
+		rl.SetShaderValue(state.shader, LOC_U_ENABLE_SKY_GRADIENT, &enable_sky_gradient, .INT)
+		rl.SetShaderValue(state.shader, LOC_U_ENABLE_DITHER, &enable_dither, .INT)
+		rl.SetShaderValue(state.shader, LOC_U_ENABLE_TONEMAP, &enable_tonemap, .INT)
+		rl.SetShaderValue(state.shader, LOC_U_LOW_QUALITY_NOISE, &low_quality_noise, .INT)
+
+		// --- pass 1: render the cloud scene into its own texture (left region only) ---
+		rl.BeginTextureMode(scene_target)
 		rl.ClearBackground(rl.BLACK)
 		rl.BeginShaderMode(state.shader)
 		rl.SetShaderValueTexture(state.shader, state.noise_tex_loc, state.noise_tex)
 		rl.SetShaderValueTexture(state.shader, state.blue_noise_tex_loc, state.blue_noise_tex)
-		rl.DrawRectangle(0, 0, i32(SCREEN_WIDTH), i32(SCREEN_HEIGHT), rl.WHITE)
+		rl.DrawRectangle(0, 0, scene_target.texture.width, scene_target.texture.height, rl.WHITE)
 		rl.EndShaderMode()
+		rl.EndTextureMode()
+
+		// --- pass 2: composite scene (left) + divider + control panel (right) ---
+		rl.BeginDrawing()
+		rl.ClearBackground(PANEL_BG)
+
+		// render textures are stored bottom-up, flip on draw
+		rl.DrawTextureRec(
+			scene_target.texture,
+			rl.Rectangle{0, 0, f32(scene_target.texture.width), -f32(scene_target.texture.height)},
+			rl.Vector2{0, 0},
+			rl.WHITE,
+		)
+
+		rl.DrawRectangle(scene_target.texture.width, 0, DIVIDER_WIDTH, i32(SCREEN_HEIGHT), DIVIDER_COL)
 
 		rl.DrawText(fmt.ctprint("FPS:", rl.GetFPS()), 10, 10, 20, rl.WHITE)
 		rl.DrawText("F5: reload shader", 10, 35, 10, rl.WHITE)

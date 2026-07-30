@@ -27,6 +27,18 @@ layout(location = 19) uniform vec3  uCloudTint;         // multiplies accumulate
 layout(location = 20) uniform float uSunGlowExponent;   // controls the tightness of the sun disc/glow
 layout(location = 21) uniform float uNoiseScale;        // scales world-space coords fed into fbm (cloud "zoom")
 
+// --- feature toggles (0 = off, 1 = on) ---
+layout(location = 22) uniform int uEnableClouds;        // master switch, sky-only when off
+layout(location = 23) uniform int uEnableAnimation;      // freezes the noise field in time when off
+layout(location = 24) uniform int uEnableLightMarch;      // self-shadowing toward the sun
+layout(location = 25) uniform int uEnablePowder;          // powder-edge darkening
+layout(location = 26) uniform int uEnableAnisotropy;       // Henyey-Greenstein phase vs. isotropic scattering
+layout(location = 27) uniform int uEnableSunGlow;           // additive sun disc/glow in the sky
+layout(location = 28) uniform int uEnableSkyGradient;         // top/bottom sky gradient vs. flat color
+layout(location = 29) uniform int uEnableDither;               // blue-noise temporal dithering of march offset
+layout(location = 30) uniform int uEnableTonemap;               // Reinhard tonemap + gamma correction
+layout(location = 31) uniform int uLowQualityNoise;               // forces cheap 3-octave fbm everywhere (fast preview)
+
 #define MAX_STEPS 100
 #define MAX_STEPS_LIGHTS 6
 #define PI 3.14159265359
@@ -55,7 +67,8 @@ float noise(in vec3 x) {
 }
 
 float fbm(vec3 p, bool lowRes) {
-    vec3 q = p + uTime * uNoiseSpeed * vec3(1.0, -0.2, -1.0);
+    float t = uTime * float(uEnableAnimation);
+    vec3 q = p + t * uNoiseSpeed * vec3(1.0, -0.2, -1.0);
     float f = 0.0;
     float scale = 0.5;
     float factor = 2.02;
@@ -70,12 +83,14 @@ float fbm(vec3 p, bool lowRes) {
 }
 
 float scene(vec3 p, bool lowRes) {
+    bool useLowRes = lowRes || (uLowQualityNoise == 1);
     float distance = sdSphere(p, uSphereRadius);
-    float f = fbm(p * uNoiseScale, lowRes);
+    float f = fbm(p * uNoiseScale, useLowRes);
     return -distance + f;
 }
 
 float lightmarch(vec3 position, vec3 rayDirection) {
+    if (uEnableLightMarch == 0) return 1.0;
     vec3 lightDirection = normalize(uSunDir);
     float totalDensity = 0.0;
     float marchSize = 0.03;
@@ -93,7 +108,10 @@ vec3 raymarch(vec3 rayOrigin, vec3 rayDirection, float offset) {
     vec3 sunDirection = normalize(uSunDir);
     float totalTransmittance = 1.0;
     vec3 lightEnergy = vec3(0.0);
-    float phase = HenyeyGreenstein(uAnisotropy, dot(rayDirection, sunDirection));
+
+    float phase = (uEnableAnisotropy == 1)
+        ? HenyeyGreenstein(uAnisotropy, dot(rayDirection, sunDirection))
+        : (1.0 / (4.0 * PI));
 
     for (int i = 0; i < MAX_STEPS; i++) {
         if (i >= uMaxSteps) break;
@@ -101,7 +119,7 @@ vec3 raymarch(vec3 rayOrigin, vec3 rayDirection, float offset) {
         if (density > 0.0) {
             float lightTransmittance = lightmarch(p, rayDirection);
             // powder effect: darkens dense cloud cores, brightens thin wispy edges
-            float powder = 1.0 - exp(-density * 2.0);
+            float powder = (uEnablePowder == 1) ? (1.0 - exp(-density * 2.0)) : 1.0;
             float shaded = uAmbient + density * phase * mix(1.0, powder, uPowderStrength);
             totalTransmittance *= lightTransmittance;
             lightEnergy += totalTransmittance * shaded * uCloudTint;
@@ -124,13 +142,30 @@ void main() {
     float sun = clamp(dot(sunDirection, rd), 0.0, 1.0);
 
     vec3 color = uSkyColorTop;
-    color -= uSkyColorBottom * rd.y;
-    color += 0.5 * uSunColor * pow(sun, uSunGlowExponent);
+    if (uEnableSkyGradient == 1) {
+        color -= uSkyColorBottom * rd.y;
+    }
+    if (uEnableSunGlow == 1) {
+        color += 0.5 * uSunColor * pow(sun, uSunGlowExponent);
+    }
 
-    float blueNoise = texture(uBlueNoiseTex, gl_FragCoord.xy / vec2(textureSize(uBlueNoiseTex, 0))).r;
-    float offset = fract(blueNoise + float(uFrame % 32) * 0.61803398875);
+    float offset = 0.5;
+    if (uEnableDither == 1) {
+        float blueNoise = texture(uBlueNoiseTex, gl_FragCoord.xy / vec2(textureSize(uBlueNoiseTex, 0))).r;
+        offset = fract(blueNoise + float(uFrame % 32) * 0.61803398875);
+    }
 
-    vec3 res = raymarch(ro, rd, offset);
+    vec3 res = vec3(0.0);
+    if (uEnableClouds == 1) {
+        res = raymarch(ro, rd, offset);
+    }
+
     color = color + uSunColor * res;
+
+    if (uEnableTonemap == 1) {
+        color = color / (color + vec3(1.0));
+        color = pow(color, vec3(1.0 / 2.2));
+    }
+
     finalColor = vec4(color, 1.0);
 }
