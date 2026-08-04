@@ -227,7 +227,7 @@ draw_upscaled :: proc(upscale_shader: rl.Shader, src: rl.RenderTexture2D, dest_w
 	// unset sampler uniform defaults to unit 0 anyway.
 	rl.DrawTexturePro(
 		src.texture,
-		rl.Rectangle{0, 0, f32(src.texture.width), -f32(src.texture.height)}, // render textures are Y-flipped
+		rl.Rectangle{0, 0, f32(src.texture.width), f32(src.texture.height)},
 		rl.Rectangle{0, 0, f32(dest_w), f32(dest_h)},
 		rl.Vector2{0, 0},
 		0,
