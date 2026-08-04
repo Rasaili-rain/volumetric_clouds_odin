@@ -43,8 +43,31 @@ layout(location = 31) uniform int uLowQualityNoise;               // forces chea
 #define MAX_STEPS_LIGHTS 6
 #define PI 3.14159265359
 
+const int CLOUD_CLUSTERS = 12;
+const int SPHERES_PER_CLUSTER = 6;
+
 float sdSphere(vec3 p, float radius) {
     return length(p) - radius;
+}
+
+float hash(float n)
+{
+    return fract(sin(n) * 43758.5453123);
+}
+
+vec3 hash3(float n)
+{
+    return vec3(
+        hash(n),
+        hash(n + 17.13),
+        hash(n + 31.71)
+    );
+}
+
+float smoothUnion(float d1, float d2, float k)
+{
+    float h = clamp(0.5 + 0.5 * (d2 - d1) / k, 0.0, 1.0);
+    return mix(d2, d1, h) - k * h * (1.0 - h);
 }
 
 float BeersLaw(float dist, float absorption) {
