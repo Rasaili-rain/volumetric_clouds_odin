@@ -9,6 +9,12 @@ SCREEN_HEIGHT := 800
 
 VERTEX_SHADER_PATH :: "shaders/vertexShader.glsl"
 FRAGMENT_SHADER_PATH :: "shaders/fragmentShader.glsl"
+UPSCALE_SHADER_PATH :: "shaders/biCubicUpscale.glsl"
+
+// clouds are raymarched at this fraction of the scene's native resolution,
+// then bicubic-upscaled back up during composite. lower = cheaper raymarch,
+// softer result.
+CLOUD_RENDER_SCALE: f32 : 0.5
 
 LOC_U_TIME :: 0
 LOC_U_RESOLUTION :: 1
@@ -44,6 +50,12 @@ LOC_U_ENABLE_DITHER :: 29
 LOC_U_ENABLE_TONEMAP :: 30
 LOC_U_LOW_QUALITY_NOISE :: 31
 
+// biCubicUpscale.glsl uses explicit `layout(location = N)` qualifiers, so
+// these must match the shader source exactly.
+LOC_UPSCALE_TEXTURE :: 0
+LOC_UPSCALE_TEXEL_SIZE :: 1
+LOC_UPSCALE_FULL_SIZE :: 2
+
 NOISE_TEXTURE_PATH :: "assets/noise.png"
 BLUE_NOISE_TEXTURE_PATH :: "assets/blueNoise.png"
 
@@ -57,23 +69,23 @@ PANEL_BG :: rl.Color{22, 22, 26, 255}
 DIVIDER_COL :: rl.Color{60, 60, 68, 255}
 
 Cloud_Params :: struct {
-	sphere_radius:     f32,
-	absorption:        f32,
-	anisotropy:        f32,
-	sun_dir:           [3]f32,
-	sun_color:         [3]f32,
-	sky_top:           [3]f32,
-	sky_bottom:        [3]f32,
-	march_size:        f32,
-	density_scale:     f32,
-	max_steps:         i32,
-	max_light_steps:   i32,
-	noise_speed:       f32,
-	ambient:           f32,
-	powder_strength:   f32,
-	cloud_tint:        [3]f32,
-	sun_glow_exponent: f32,
-	noise_scale:       f32,
+	sphere_radius:       f32,
+	absorption:          f32,
+	anisotropy:          f32,
+	sun_dir:             [3]f32,
+	sun_color:           [3]f32,
+	sky_top:             [3]f32,
+	sky_bottom:          [3]f32,
+	march_size:          f32,
+	density_scale:       f32,
+	max_steps:           i32,
+	max_light_steps:     i32,
+	noise_speed:         f32,
+	ambient:             f32,
+	powder_strength:     f32,
+	cloud_tint:          [3]f32,
+	sun_glow_exponent:   f32,
+	noise_scale:         f32,
 
 	// --- feature toggles ---
 	enable_clouds:       bool,
@@ -137,6 +149,14 @@ scene_rect :: proc() -> (x, y, w, h: i32) {
 	return 0, 0, w, h
 }
 
+// resolution the cloud shader actually raymarches at, derived from the
+// full-res scene rect scaled down by CLOUD_RENDER_SCALE.
+cloud_target_size :: proc(scene_w, scene_h: i32) -> (w, h: i32) {
+	w = max(i32(f32(scene_w) * CLOUD_RENDER_SCALE), 1)
+	h = max(i32(f32(scene_h) * CLOUD_RENDER_SCALE), 1)
+	return
+}
+
 Toggle_Uniform :: struct {
 	loc: i32,
 	val: ^bool,
@@ -161,7 +181,13 @@ set_toggle_uniforms :: proc(shader: rl.Shader, p: ^Cloud_Params) {
 	}
 }
 
-set_scalar_uniforms :: proc(shader: rl.Shader, p: ^Cloud_Params, resolution: [2]f32, time: f32, frame_count: i32) {
+set_scalar_uniforms :: proc(
+	shader: rl.Shader,
+	p: ^Cloud_Params,
+	resolution: [2]f32,
+	time: f32,
+	frame_count: i32,
+) {
 	res := resolution
 	t := time
 	fc := frame_count
@@ -187,6 +213,29 @@ set_scalar_uniforms :: proc(shader: rl.Shader, p: ^Cloud_Params, resolution: [2]
 	rl.SetShaderValue(shader, LOC_U_NOISE_SCALE, &p.noise_scale, .FLOAT)
 }
 
+// draws `src` (a low-res render texture) into the given full-res destination
+// rect using the bicubic upscale shader.
+draw_upscaled :: proc(upscale_shader: rl.Shader, src: rl.RenderTexture2D, dest_w, dest_h: i32) {
+	texel_size := [2]f32{1.0 / f32(src.texture.width), 1.0 / f32(src.texture.height)}
+	full_size := [2]f32{f32(src.texture.width), f32(src.texture.height)}
+
+	rl.BeginShaderMode(upscale_shader)
+	rl.SetShaderValue(upscale_shader, LOC_UPSCALE_TEXEL_SIZE, &texel_size, .VEC2)
+	rl.SetShaderValue(upscale_shader, LOC_UPSCALE_FULL_SIZE, &full_size, .VEC2)
+	// LOC_UPSCALE_TEXTURE (location 0) needs no explicit SetShaderValueTexture
+	// call: DrawTexturePro binds `src.texture` to GL texture unit 0, and an
+	// unset sampler uniform defaults to unit 0 anyway.
+	rl.DrawTexturePro(
+		src.texture,
+		rl.Rectangle{0, 0, f32(src.texture.width), -f32(src.texture.height)}, // render textures are Y-flipped
+		rl.Rectangle{0, 0, f32(dest_w), f32(dest_h)},
+		rl.Vector2{0, 0},
+		0,
+		rl.WHITE,
+	)
+	rl.EndShaderMode()
+}
+
 main :: proc() {
 	context.logger = log.create_console_logger(
 		opt = log.Options{.Level, .Terminal_Color, .Time, .Short_File_Path, .Line, .Procedure},
@@ -210,13 +259,22 @@ main :: proc() {
 	defer rl.UnloadTexture(state.noise_tex)
 	defer rl.UnloadTexture(state.blue_noise_tex)
 
+	upscale_shader := rl.LoadShader(nil, UPSCALE_SHADER_PATH)
+	if upscale_shader.id == 0 {
+		log.error("Failed to load upscale shader, exiting.")
+		return
+	}
+	defer rl.UnloadShader(upscale_shader)
+
 	params := default_params()
 	frame_count: i32 = 0
 
-	// off-screen target the cloud shader renders into; sized to the left (scene) region only
+	// clouds raymarch into this low-res target; it gets bicubic-upscaled
+	// into the full-res scene area every frame.
 	_, _, scene_w, scene_h := scene_rect()
-	scene_target := rl.LoadRenderTexture(scene_w, scene_h)
-	defer rl.UnloadRenderTexture(scene_target)
+	cloud_w, cloud_h := cloud_target_size(scene_w, scene_h)
+	cloud_target := rl.LoadRenderTexture(cloud_w, cloud_h)
+	defer rl.UnloadRenderTexture(cloud_target)
 
 	for !rl.WindowShouldClose() {
 		// poll the real framebuffer size every frame rather than relying on
@@ -233,11 +291,13 @@ main :: proc() {
 			reload_shader(&state)
 		}
 
-		// keep the render target in sync with the scene region's size
-		_, _, want_w, want_h := scene_rect()
-		if want_w != scene_target.texture.width || want_h != scene_target.texture.height {
-			rl.UnloadRenderTexture(scene_target)
-			scene_target = rl.LoadRenderTexture(want_w, want_h)
+		// keep the low-res cloud target in sync with the scene region's size
+		_, _, want_scene_w, want_scene_h := scene_rect()
+		want_cloud_w, want_cloud_h := cloud_target_size(want_scene_w, want_scene_h)
+		if want_cloud_w != cloud_target.texture.width ||
+		   want_cloud_h != cloud_target.texture.height {
+			rl.UnloadRenderTexture(cloud_target)
+			cloud_target = rl.LoadRenderTexture(want_cloud_w, want_cloud_h)
 		}
 
 		ctx := &ui_state.mu_ctx
@@ -245,39 +305,27 @@ main :: proc() {
 		mu_begin_and_draw(ctx, &params)
 
 		time := f32(rl.GetTime())
-		resolution := [2]f32{f32(scene_target.texture.width), f32(scene_target.texture.height)}
+		resolution := [2]f32{f32(cloud_target.texture.width), f32(cloud_target.texture.height)}
 		set_scalar_uniforms(state.shader, &params, resolution, time, frame_count)
 		set_toggle_uniforms(state.shader, &params)
 
-		// --- pass 1: render the cloud scene into its own texture (left region only) ---
-		rl.BeginTextureMode(scene_target)
+		// --- pass 1: raymarch clouds at low res into cloud_target ---
+		rl.BeginTextureMode(cloud_target)
 		rl.ClearBackground(rl.BLACK)
 		rl.BeginShaderMode(state.shader)
 		rl.SetShaderValueTexture(state.shader, state.noise_tex_loc, state.noise_tex)
 		rl.SetShaderValueTexture(state.shader, state.blue_noise_tex_loc, state.blue_noise_tex)
-		rl.DrawRectangle(0, 0, scene_target.texture.width, scene_target.texture.height, rl.WHITE)
+		rl.DrawRectangle(0, 0, cloud_target.texture.width, cloud_target.texture.height, rl.WHITE)
 		rl.EndShaderMode()
 		rl.EndTextureMode()
 
-		// --- pass 2: composite scene (left) + divider + control panel (right) ---
+		// --- pass 2: composite bicubic-upscaled clouds (left) + divider + control panel (right) ---
 		rl.BeginDrawing()
 		rl.ClearBackground(PANEL_BG)
 
-		// render textures are stored bottom-up, flip on draw
-		rl.DrawTextureRec(
-			scene_target.texture,
-			rl.Rectangle{0, 0, f32(scene_target.texture.width), -f32(scene_target.texture.height)},
-			rl.Vector2{0, 0},
-			rl.WHITE,
-		)
+		draw_upscaled(upscale_shader, cloud_target, want_scene_w, want_scene_h)
 
-		rl.DrawRectangle(
-			scene_target.texture.width,
-			0,
-			DIVIDER_WIDTH,
-			i32(SCREEN_HEIGHT),
-			DIVIDER_COL,
-		)
+		rl.DrawRectangle(want_scene_w, 0, DIVIDER_WIDTH, i32(SCREEN_HEIGHT), DIVIDER_COL)
 
 		rl.DrawText(fmt.ctprint("FPS:", rl.GetFPS()), 10, 10, 20, rl.WHITE)
 		rl.DrawText("F5: reload shader", 10, 35, 10, rl.WHITE)
