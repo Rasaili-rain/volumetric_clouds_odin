@@ -132,9 +132,9 @@ float scene(vec3 p, bool lowRes)
             );
 
         clusterPos += vec3(
-            time * 0.35,
+            time * 0.35 / 2,
             sin(time*0.2+float(c))*0.08,
-            time * 0.15
+            time * 0.15 / 2
         );
         // clusterPos.x += time * 0.35;
         // clusterPos.z += time * 0.10;
