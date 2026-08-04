@@ -162,7 +162,7 @@ Clone the repository
 
 ```bash
 git clone https://github.com/Rasaili-rain/volumetric_clouds_odin
-cd volumetric-cloud-renderer
+cd volumetric_clouds_odin
 ```
 
 Run
