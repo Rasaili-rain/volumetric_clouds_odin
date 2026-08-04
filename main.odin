@@ -245,7 +245,7 @@ main :: proc() {
 	rl.SetConfigFlags({.WINDOW_RESIZABLE})
 	rl.InitWindow(i32(SCREEN_WIDTH), i32(SCREEN_HEIGHT), "Raymarching")
 	defer rl.CloseWindow()
-	// rl.SetTargetFPS(60)
+	rl.SetTargetFPS(60)
 
 	init_microui()
 	defer shutdown_microui()
