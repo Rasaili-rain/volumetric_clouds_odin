@@ -105,11 +105,94 @@ float fbm(vec3 p, bool lowRes) {
     return f * uDensityScale;
 }
 
-float scene(vec3 p, bool lowRes) {
+// float scene(vec3 p, bool lowRes) {
+//     bool useLowRes = lowRes || (uLowQualityNoise == 1);
+//     float distance = sdSphere(p, uSphereRadius);
+//     float f = fbm(p * uNoiseScale, useLowRes);
+//     return -distance + f;
+// }
+
+float scene(vec3 p, bool lowRes)
+{
     bool useLowRes = lowRes || (uLowQualityNoise == 1);
-    float distance = sdSphere(p, uSphereRadius);
-    float f = fbm(p * uNoiseScale, useLowRes);
-    return -distance + f;
+
+    float density = -1000.0;
+
+    float time = uTime * float(uEnableAnimation);
+
+    for(int c = 0; c < CLOUD_CLUSTERS; c++)
+    {
+        vec3 rnd = hash3(float(c));
+
+        vec3 clusterPos =
+            vec3(
+                (rnd.x - 0.5) * 18.0,
+                (rnd.y - 0.5) * 2.5,
+                (rnd.z - 0.5) * 18.0
+            );
+
+        clusterPos += vec3(
+            time * 0.35,
+            sin(time*0.2+float(c))*0.08,
+            time * 0.15
+        );
+        // clusterPos.x += time * 0.35;
+        // clusterPos.z += time * 0.10;
+
+        float clusterDensity = 1000.0;
+        float bound = sdSphere(p - clusterPos, 4.0);
+
+        if (bound > 0.5)
+            continue;
+
+        for(int s = 0; s < SPHERES_PER_CLUSTER; s++)
+        {
+            float seed = float(c * 100 + s);
+
+            vec3 r = hash3(seed);
+
+            vec3 offset =
+                (r - 0.5) *
+                vec3(2.5,1.2,2.5);
+
+            float radius =
+                uSphereRadius *
+                mix(0.35,0.75,hash(seed+9.0));
+
+            vec3 q = p - clusterPos - offset;
+
+            q.y *= 1.5;
+
+            float sphere = sdSphere(q,radius);
+
+            clusterDensity =
+                smoothUnion(
+                    clusterDensity,
+                    sphere,
+                    0.5
+                );
+        }
+
+        clusterDensity = -clusterDensity;
+
+        float erosion =
+            fbm(
+                (p-clusterPos) *
+                uNoiseScale,
+                useLowRes
+            );
+
+        clusterDensity += erosion;
+
+        density = max(density,clusterDensity);
+    }
+    float h =
+        smoothstep(-1.5,-0.4,p.y)
+        *
+        (1.0-smoothstep(0.8,2.2,p.y));
+
+    density *= h;
+    return density;
 }
 
 float lightmarch(vec3 position, vec3 rayDirection) {
