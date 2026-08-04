@@ -26,9 +26,16 @@ A real-time volumetric cloud renderer written in **Odin** using **raylib** and *
 
 ## Screenshots
 
-| Clouds | Parameters |
-|--------|------------|
-|||
+| Clouds |
+|--------|
+|<img width="1919" height="1079" alt="image" src="https://github.com/Rasaili-rain/volumetric_clouds_odin/blob/7d1a2ce9cbb753f3c2f98d8b2e952b388244b3c4/assets/images/screenshot_2026-08-04_215020.png" />|
+|<img width="1919" height="1079" alt="image" src="https://github.com/Rasaili-rain/volumetric_clouds_odin/blob/7d1a2ce9cbb753f3c2f98d8b2e952b388244b3c4/assets/images/screenshot_2026-08-04_215022.png" />|
+|<img width="1919" height="1079" alt="image" src="https://github.com/Rasaili-rain/volumetric_clouds_odin/blob/7d1a2ce9cbb753f3c2f98d8b2e952b388244b3c4/assets/images/screenshot_2026-08-04_215333.png" />|
+|<img width="1919" height="1079" alt="image" src="https://github.com/Rasaili-rain/volumetric_clouds_odin/blob/7d1a2ce9cbb753f3c2f98d8b2e952b388244b3c4/assets/images/screenshot_2026-08-04_215409.png" />|
+|<img width="1919" height="1079" alt="image" src="https://github.com/Rasaili-rain/volumetric_clouds_odin/blob/7d1a2ce9cbb753f3c2f98d8b2e952b388244b3c4/assets/images/screenshot_2026-08-04_215754.png" />|
+|<img width="1919" height="1079" alt="image" src="https://github.com/Rasaili-rain/volumetric_clouds_odin/blob/7d1a2ce9cbb753f3c2f98d8b2e952b388244b3c4/assets/images/screenshot_2026-08-04_220010.png" />|
+|<img width="1919" height="1079" alt="image" src="https://github.com/Rasaili-rain/volumetric_clouds_odin/blob/7d1a2ce9cbb753f3c2f98d8b2e952b388244b3c4/assets/images/screenshot_2026-08-04_220053.png" />|
+|<img width="1919" height="1079" alt="image" src="https://github.com/Rasaili-rain/volumetric_clouds_odin/blob/7d1a2ce9cbb753f3c2f98d8b2e952b388244b3c4/assets/images/screenshot_2026-08-04_220102.png" />|
 
 ---
 
